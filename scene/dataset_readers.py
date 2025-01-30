@@ -26,6 +26,7 @@ from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import camera_nerfies_from_JSON
+from natsort import natsorted
 
 
 class CameraInfo(NamedTuple):
@@ -131,9 +132,11 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
 
         image_path = os.path.join(images_folder, os.path.basename(extr.name))
         image_name = os.path.basename(image_path).split(".")[0]
+        if not os.path.exists(image_path):
+            continue
         image = Image.open(image_path)
 
-        fid = int(image_name) / (num_frames - 1)
+        fid = int(image_name.replace('frame_', '')) / (num_frames - 1)
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                               image_path=image_path, image_name=image_name, width=width, height=height, fid=fid)
         cam_infos.append(cam_info)
@@ -169,7 +172,7 @@ def storePly(path, xyz, rgb):
     ply_data.write(path)
 
 
-def readColmapSceneInfo(path, images, eval, llffhold=8):
+def readColmapSceneInfo(path, images, eval, llffhold=2):
     try:
         cameras_extrinsic_file = os.path.join(path, "sparse/0", "images.bin")
         cameras_intrinsic_file = os.path.join(path, "sparse/0", "cameras.bin")
@@ -188,9 +191,9 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(
-            cam_infos) if idx % llffhold != 0]
+            cam_infos) if (idx + 1) % llffhold != 0]
         test_cam_infos = [c for idx, c in enumerate(
-            cam_infos) if idx % llffhold == 0]
+            cam_infos) if (idx + 1) % llffhold == 0]
     else:
         train_cam_infos = cam_infos
         test_cam_infos = []
@@ -596,6 +599,83 @@ def readPlenopticVideoDataset(path, eval, num_images, hold_id=[0]):
                            ply_path=ply_path)
     return scene_info
 
+def readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_masks_path):
+    with open(intrinsics_path, 'r') as f:
+        intrinsics = f.read().split('\n')
+    intrinsics = [line for line in intrinsics if line != '']
+    with open(extrinsics_path, 'r') as f:
+        extrinsics = f.read().split('\n')
+    extrinsics = [line for line in extrinsics if line != '']
+    images = [Image.open(os.path.join(images_path, img)) for img in sorted(os.listdir(images_path))]
+    dynamic_masks = [cv.imread(os.path.join(dynamic_masks_path, img)) for img in natsorted(os.listdir(dynamic_masks_path))]
+    dynamic_masks = [mask[:, :, 0] > 0 for mask in dynamic_masks]
+    assert len(intrinsics) == len(extrinsics) == len(images) == len(dynamic_masks)
+    
+    width = images[0].size[0]
+    height = images[0].size[1]
+
+    cam_infos = []
+    for i, (intrs, extrs, img) in enumerate(zip(intrinsics, extrinsics, images)):
+        intrs = list(map(float, intrs.split(' ')))
+        extrs = list(map(float, extrs.split(' ')))
+        # extrs: t, X, Y, Z, QW, QX, QY, QZ
+        # https://github.com/Junyi42/monst3r/blob/d3480df6714c383097bbfaf02f58df6f375bf38b/dust3r/utils/vo_eval.py#L281
+        tvec = extrs[1:4]
+        qvec = extrs[4:]
+
+        # monst3r saves the camera to world matrix
+        # https://github.com/Junyi42/monst3r/blob/d3480df6714c383097bbfaf02f58df6f375bf38b/dust3r/cloud_opt/base_opt.py#L307
+        R = qvec2rotmat(qvec)
+        T = np.array(tvec)
+        c2w = np.zeros((4, 4))
+        c2w[:3, :3] = R
+        c2w[:3, 3] = T
+        c2w[3, 3] = 1
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(w2c[:3,:3])
+        T = w2c[:3, 3]
+
+        focal_x = intrs[0]
+        focal_y = intrs[4]
+        fovx = focal2fov(focal_x, width)
+        fovy = focal2fov(focal_y, height)
+
+        frame_time = i / (len(images) - 1)
+        cam_info = CameraInfo(uid=i, R=R, T=T, FovY=fovy, FovX=fovx, image=img,
+                              image_path=os.path.join(images_path, f'frame_{i:04d}.png'), image_name=f'{i}', 
+                              width=width, height=height, fid=frame_time)
+        cam_infos.append(cam_info)
+
+    return cam_infos
+
+
+def readMonST3RSceneInfo(path, eval, llffhold=2):
+    # read camera intrinsics
+    intrinsics_path = os.path.join(path, 'pred_intrinsics.txt')
+    extrinsics_path = os.path.join(path, 'pred_traj.txt')
+    images_path = os.path.join(path, 'images')
+    dynamic_masks_path = os.path.join(path, 'dynamic_masks')
+    cam_infos = readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_masks_path)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(cam_infos) if (idx + 1) % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(cam_infos) if (idx + 1) % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    points_path = os.path.join(path, 'points.ply')
+    points = fetchPly(points_path)
+
+    scene_info = SceneInfo(point_cloud=points,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=points_path)
+    return scene_info
+
 
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,  # colmap dataset reader from official 3D Gaussian [https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/]
@@ -603,4 +683,5 @@ sceneLoadTypeCallbacks = {
     "DTU": readNeuSDTUInfo,  # DTU dataset used in Tensor4D [https://github.com/DSaurus/Tensor4D]
     "nerfies": readNerfiesInfo,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
     "plenopticVideo": readPlenopticVideoDataset,  # Neural 3D dataset in [https://github.com/facebookresearch/Neural_3D_Video]
+    'MonST3R': readMonST3RSceneInfo
 }

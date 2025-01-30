@@ -24,7 +24,7 @@ from gaussian_renderer import GaussianModel
 import imageio
 import numpy as np
 import time
-
+from utils.image_utils import psnr
 
 def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views, gaussians, pipeline, background, deform):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
@@ -37,6 +37,8 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
 
     t_list = []
 
+    images = torch.tensor([], device="cuda")
+    gts = torch.tensor([], device="cuda")
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         if load2gpu_on_the_fly:
             view.load2device()
@@ -46,10 +48,12 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
         d_xyz, d_rotation, d_scaling = deform.step(xyz.detach(), time_input)
         results = render(view, gaussians, pipeline, background, d_xyz, d_rotation, d_scaling, is_6dof)
         rendering = results["render"]
+        images = torch.cat([images, rendering.unsqueeze(0)], 0)
         depth = results["depth"]
         depth = depth / (depth.max() + 1e-5)
 
         gt = view.original_image[0:3, :, :]
+        gts = torch.cat([gts, gt.unsqueeze(0)], 0)
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(depth, os.path.join(depth_path, '{0:05d}'.format(idx) + ".png"))
@@ -69,9 +73,10 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
         t_end = time.time()
         t_list.append(t_end - t_start)
 
+    psnr_val = psnr(images, gts).mean()
     t = np.array(t_list[5:])
     fps = 1.0 / t.mean()
-    print(f'Test FPS: \033[1;35m{fps:.5f}\033[0m, Num. of GS: {xyz.shape[0]}')
+    print(f'Test FPS: \033[1;35m{fps:.5f}\033[0m, Num. of GS: {xyz.shape[0]}, PSNR: {psnr_val.item():.5f}')
 
 
 def interpolate_time(model_path, load2gpt_on_the_fly, is_6dof, name, iteration, views, gaussians, pipeline, background, deform):
