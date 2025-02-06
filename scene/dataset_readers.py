@@ -27,7 +27,8 @@ from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import camera_nerfies_from_JSON
 from natsort import natsorted
-
+import pyvista as pv
+from procrustes import orthogonal, rotational
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -214,6 +215,11 @@ def readColmapSceneInfo(path, images, eval, llffhold=2):
         pcd = fetchPly(ply_path)
     except:
         pcd = None
+
+    plot = pv.Plotter()
+    plot.add_points(pcd.points, scalars=pcd.colors, rgb=True)
+    plot_trajectory(plot, cam_infos)
+    plot.show()
 
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
@@ -649,6 +655,62 @@ def readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_ma
     return cam_infos
 
 
+def plot_trajectory(plot, cam_infos):
+    # show the cameras
+    for cam in cam_infos:
+        w2c = np.zeros((4, 4))
+        w2c[:3, :3] = np.transpose(cam.R)
+        w2c[:3, 3] = cam.T
+        w2c[3, 3] = 1
+        c2w = np.linalg.inv(w2c)
+        T = c2w[:3, 3]
+        plot.add_mesh(pv.Sphere(radius=0.1, center=T), color='red')
+        up_vector = np.array([0, 0, 1])
+        direction = np.dot(c2w[:3, :3], up_vector)
+        plot.add_mesh(pv.Arrow(start=T, direction=direction), color='blue')
+
+
+def cam_info_to_c2w(cam_info):
+    w2c = np.zeros((4, 4))
+    w2c[:3, :3] = np.transpose(cam_info.R)
+    w2c[:3, 3] = cam_info.T
+    w2c[3, 3] = 1
+    c2w = np.linalg.inv(w2c)
+    return c2w
+
+
+def align_cam_infos(monst3r_infos, colmap_infos):
+    monst3r_c2ws = [cam_info_to_c2w(cam_info) for cam_info in monst3r_infos]
+    colmap_c2ws = [cam_info_to_c2w(cam_info) for cam_info in colmap_infos]
+    monst3r_traj = np.array([c2w[:3, 3] for c2w in monst3r_c2ws])
+    colmap_traj = np.array([c2w[:3, 3] for c2w in colmap_c2ws])
+    result = rotational(colmap_traj, monst3r_traj)
+    new_colmap_traj = np.dot(result.new_a, result.t)
+
+    new_cam_infos = []
+    for i, cam_info in enumerate(colmap_infos):
+        T = new_colmap_traj[i]
+        R = colmap_c2ws[i][:3, :3] @ result.t.T
+        c2w = np.zeros((4, 4))
+        c2w[:3, :3] = R
+        c2w[:3, 3] = T
+        c2w[3, 3] = 1
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(w2c[:3,:3])
+        T = w2c[:3, 3]
+        new_cam_info = CameraInfo(uid=cam_info.uid, R=R, T=T, FovY=cam_info.FovY, FovX=cam_info.FovX, image=cam_info.image,
+                                  image_path=cam_info.image_path, image_name=cam_info.image_name, width=cam_info.width, height=cam_info.height, fid=cam_info.fid)
+        new_cam_infos.append(new_cam_info)
+    return new_cam_infos
+
+    # for i, T in enumerate(new_colmap_traj):
+    #     plot.add_mesh(pv.Sphere(radius=0.1, center=T), color='red')
+    #     up_vector = np.array([0, 0, 1])
+    #     direction = np.dot(colmap_c2ws[i][:3, :3] @ result.t.T, up_vector)
+    #     # plot.add_mesh(pv.Arrow(start=T, direction=np.dot(result.t, direction)), color='blue')
+    #     plot.add_mesh(pv.Arrow(start=T, direction=direction), color='green')
+
+
 def readMonST3RSceneInfo(path, eval, llffhold=2):
     # read camera intrinsics
     intrinsics_path = os.path.join(path, 'pred_intrinsics.txt')
@@ -656,6 +718,22 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
     images_path = os.path.join(path, 'images')
     dynamic_masks_path = os.path.join(path, 'dynamic_masks')
     cam_infos = readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_masks_path)
+
+    cameras_extrinsic_file = os.path.join(path, "images.bin")
+    cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
+    cam_extrinsics = sorted(cam_extrinsics.values(), key=lambda x: x.name)
+
+    colmap_cam_infos = []
+    for i, extr in enumerate(cam_extrinsics):
+        R = np.transpose(qvec2rotmat(extr.qvec))
+        T = extr.tvec
+        monst3r_cam_info = cam_infos[i]
+        cam_info = CameraInfo(monst3r_cam_info.uid, R, T, monst3r_cam_info.FovY, monst3r_cam_info.FovX, monst3r_cam_info.image, 
+                              monst3r_cam_info.image_path, monst3r_cam_info.image_name, monst3r_cam_info.width, monst3r_cam_info.height, monst3r_cam_info.fid)
+        colmap_cam_infos.append(cam_info)
+
+    cam_infos = align_cam_infos(cam_infos, colmap_cam_infos)
+
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if (idx + 1) % llffhold != 0]
@@ -668,6 +746,11 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
 
     points_path = os.path.join(path, 'points.ply')
     points = fetchPly(points_path)
+
+    plot = pv.Plotter()
+    plot.add_points(points=points.points, scalars=points.colors, rgb=True)
+    plot_trajectory(plot, cam_infos)
+    plot.show()
 
     scene_info = SceneInfo(point_cloud=points,
                            train_cameras=train_cam_infos,
