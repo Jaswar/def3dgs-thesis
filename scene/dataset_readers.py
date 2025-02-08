@@ -701,7 +701,7 @@ def align_cam_infos(monst3r_infos, colmap_infos):
         new_cam_info = CameraInfo(uid=cam_info.uid, R=R, T=T, FovY=cam_info.FovY, FovX=cam_info.FovX, image=cam_info.image,
                                   image_path=cam_info.image_path, image_name=cam_info.image_name, width=cam_info.width, height=cam_info.height, fid=cam_info.fid)
         new_cam_infos.append(new_cam_info)
-    return new_cam_infos
+    return result.t
 
     # for i, T in enumerate(new_colmap_traj):
     #     plot.add_mesh(pv.Sphere(radius=0.1, center=T), color='red')
@@ -717,7 +717,7 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
     extrinsics_path = os.path.join(path, 'pred_traj.txt')
     images_path = os.path.join(path, 'images')
     dynamic_masks_path = os.path.join(path, 'dynamic_masks')
-    cam_infos = readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_masks_path)
+    monst3r_cam_infos = readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_masks_path)
 
     cameras_extrinsic_file = os.path.join(path, "images.bin")
     cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
@@ -727,13 +727,13 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
     for i, extr in enumerate(cam_extrinsics):
         R = np.transpose(qvec2rotmat(extr.qvec))
         T = extr.tvec
-        monst3r_cam_info = cam_infos[i]
+        monst3r_cam_info = monst3r_cam_infos[i]
         cam_info = CameraInfo(monst3r_cam_info.uid, R, T, monst3r_cam_info.FovY, monst3r_cam_info.FovX, monst3r_cam_info.image, 
                               monst3r_cam_info.image_path, monst3r_cam_info.image_name, monst3r_cam_info.width, monst3r_cam_info.height, monst3r_cam_info.fid)
         colmap_cam_infos.append(cam_info)
 
-    cam_infos = align_cam_infos(cam_infos, colmap_cam_infos)
-
+    transformation = align_cam_infos(monst3r_cam_infos, colmap_cam_infos)
+    cam_infos = colmap_cam_infos
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if (idx + 1) % llffhold != 0]
@@ -746,10 +746,14 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
 
     points_path = os.path.join(path, 'points.ply')
     points = fetchPly(points_path)
+    xyz = np.dot(points.points, transformation.T)
+    points = BasicPointCloud(points=xyz, colors=points.colors, normals=points.normals)
 
     plot = pv.Plotter()
     plot.add_points(points=points.points, scalars=points.colors, rgb=True)
     plot_trajectory(plot, cam_infos)
+    # plot_trajectory(plot, monst3r_cam_infos)
+    plot_trajectory(plot, colmap_cam_infos)
     plot.show()
 
     scene_info = SceneInfo(point_cloud=points,
