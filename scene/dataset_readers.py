@@ -700,8 +700,10 @@ def align_cam_infos(monst3r_infos, colmap_infos):
     colmap_c2ws = [cam_info_to_c2w(cam_info) for cam_info in colmap_infos]
     monst3r_traj = np.array([c2w[:3, 3] for c2w in monst3r_c2ws])
     colmap_traj = np.array([c2w[:3, 3] for c2w in colmap_c2ws])
-    _, translation = _translate_array(monst3r_traj, None)
-    _, scale = _scale_array(monst3r_traj, None)
+    _, monst3r_translation = _translate_array(monst3r_traj, None)
+    _, monst3r_scale = _scale_array(monst3r_traj + monst3r_translation, None)
+    _, colmap_translation = _translate_array(colmap_traj, None)
+    _, colmap_scale = _scale_array(colmap_traj + colmap_translation, None)
     result = rotational(colmap_traj, monst3r_traj, scale=True, translate=True)
     new_colmap_traj = np.dot(result.new_a, result.t)
 
@@ -716,7 +718,7 @@ def align_cam_infos(monst3r_infos, colmap_infos):
         new_colmap_cam_infos.append(new_colmap_cam_info)
         new_monst3r_cam_infos.append(new_monst3r_cam_info)
 
-    return transformed_cam_infos, result.t, scale, translation, new_colmap_cam_infos, new_monst3r_cam_infos
+    return transformed_cam_infos, result.t, monst3r_translation, monst3r_scale, colmap_translation, colmap_scale, new_colmap_cam_infos, new_monst3r_cam_infos
 
 
 def readMonST3RSceneInfo(path, eval, llffhold=2):
@@ -740,8 +742,8 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
                               monst3r_cam_info.image_path, monst3r_cam_info.image_name, monst3r_cam_info.width, monst3r_cam_info.height, monst3r_cam_info.fid)
         colmap_cam_infos.append(cam_info)
 
-    transformed_cam_infos, transformation, scale, translation, new_colmap_cam_infos, new_monst3r_cam_infos = align_cam_infos(monst3r_cam_infos, colmap_cam_infos)
-    cam_infos = transformed_cam_infos
+    transformed_cam_infos, transformation, monst3r_translation, monst3r_scale, colmap_translation, colmap_scale, new_colmap_cam_infos, new_monst3r_cam_infos = align_cam_infos(monst3r_cam_infos, colmap_cam_infos)
+    cam_infos = colmap_cam_infos
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if (idx + 1) % llffhold != 0]
@@ -754,20 +756,21 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
 
     points_path = os.path.join(path, 'points.ply')
     points = fetchPly(points_path)
-    normalized_xyz = scale * (points.points + translation)
+    normalized_xyz = monst3r_scale * (points.points + monst3r_translation)
     normalized_points = BasicPointCloud(points=normalized_xyz, colors=points.colors, normals=points.normals)
-    transformed_xyz = np.dot(scale * (points.points + translation), transformation.T)
+    transformed_xyz = np.dot(normalized_xyz, transformation.T)
+    transformed_xyz = transformed_xyz / colmap_scale - colmap_translation
     transformed_points = BasicPointCloud(points=transformed_xyz, colors=points.colors, normals=points.normals)
 
     plot = pv.Plotter(shape=(1, 2))
     plot.subplot(0, 0)
     plot.add_points(points=normalized_points.points, scalars=normalized_points.colors, rgb=True)
-    plot_trajectory(plot, new_monst3r_cam_infos, 'green', scale)
-    plot_trajectory(plot, new_colmap_cam_infos, 'red', scale)
+    plot_trajectory(plot, new_monst3r_cam_infos, 'green', monst3r_scale)
+    plot_trajectory(plot, new_colmap_cam_infos, 'red', monst3r_scale)
     plot.subplot(0, 1)
-    plot.add_points(points=normalized_points.points, scalars=normalized_points.colors, rgb=True)
-    plot_trajectory(plot, new_monst3r_cam_infos, 'green', scale)
-    plot_trajectory(plot, transformed_cam_infos, 'red', scale)
+    plot.add_points(points=transformed_points.points, scalars=transformed_points.colors, rgb=True)
+    # plot_trajectory(plot, new_monst3r_cam_infos, 'green', monst3r_scale)
+    plot_trajectory(plot, colmap_cam_infos, 'red', 1 / monst3r_scale)
     # plot.subplot(0, 2)
     # plot.add_points(points=new_points.points, scalars=new_points.colors, rgb=True)
     # plot_trajectory(plot, cam_infos, 'green')
@@ -776,7 +779,7 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
     plot.link_views()
     plot.show()
 
-    scene_info = SceneInfo(point_cloud=normalized_points,
+    scene_info = SceneInfo(point_cloud=transformed_points,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
