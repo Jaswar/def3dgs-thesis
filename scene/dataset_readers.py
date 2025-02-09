@@ -28,7 +28,8 @@ from scene.gaussian_model import BasicPointCloud
 from utils.camera_utils import camera_nerfies_from_JSON
 from natsort import natsorted
 import pyvista as pv
-from procrustes import orthogonal, rotational
+from procrustes import orthogonal, rotational, generic
+from procrustes.utils import _scale_array, _translate_array
 
 class CameraInfo(NamedTuple):
     uid: int
@@ -655,7 +656,7 @@ def readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_ma
     return cam_infos
 
 
-def plot_trajectory(plot, cam_infos):
+def plot_trajectory(plot, cam_infos, color, scale):
     # show the cameras
     for cam in cam_infos:
         w2c = np.zeros((4, 4))
@@ -664,10 +665,10 @@ def plot_trajectory(plot, cam_infos):
         w2c[3, 3] = 1
         c2w = np.linalg.inv(w2c)
         T = c2w[:3, 3]
-        plot.add_mesh(pv.Sphere(radius=0.1, center=T), color='red')
+        plot.add_mesh(pv.Sphere(radius=0.01 * scale, center=T), color=color)
         up_vector = np.array([0, 0, 1])
         direction = np.dot(c2w[:3, :3], up_vector)
-        plot.add_mesh(pv.Arrow(start=T, direction=direction), color='blue')
+        plot.add_mesh(pv.Arrow(start=T, direction=direction, scale=scale * 0.1), color='blue')
 
 
 def cam_info_to_c2w(cam_info):
@@ -679,36 +680,43 @@ def cam_info_to_c2w(cam_info):
     return c2w
 
 
+def cam_info_from_RT(cam_info, traj, c2w, transformation):
+    T = traj
+    R = c2w[:3, :3] @ transformation.T
+    c2w = np.zeros((4, 4))
+    c2w[:3, :3] = R
+    c2w[:3, 3] = T
+    c2w[3, 3] = 1
+    w2c = np.linalg.inv(c2w)
+    R = np.transpose(w2c[:3,:3])
+    T = w2c[:3, 3]
+    new_cam_info = CameraInfo(uid=cam_info.uid, R=R, T=T, FovY=cam_info.FovY, FovX=cam_info.FovX, image=cam_info.image,
+                                  image_path=cam_info.image_path, image_name=cam_info.image_name, width=cam_info.width, height=cam_info.height, fid=cam_info.fid)
+    return new_cam_info
+
+
 def align_cam_infos(monst3r_infos, colmap_infos):
     monst3r_c2ws = [cam_info_to_c2w(cam_info) for cam_info in monst3r_infos]
     colmap_c2ws = [cam_info_to_c2w(cam_info) for cam_info in colmap_infos]
     monst3r_traj = np.array([c2w[:3, 3] for c2w in monst3r_c2ws])
     colmap_traj = np.array([c2w[:3, 3] for c2w in colmap_c2ws])
-    result = rotational(colmap_traj, monst3r_traj)
+    _, translation = _translate_array(monst3r_traj, None)
+    _, scale = _scale_array(monst3r_traj, None)
+    result = rotational(colmap_traj, monst3r_traj, scale=True, translate=True)
     new_colmap_traj = np.dot(result.new_a, result.t)
 
-    new_cam_infos = []
+    transformed_cam_infos = []
+    new_colmap_cam_infos = []
+    new_monst3r_cam_infos = []
     for i, cam_info in enumerate(colmap_infos):
-        T = new_colmap_traj[i]
-        R = colmap_c2ws[i][:3, :3] @ result.t.T
-        c2w = np.zeros((4, 4))
-        c2w[:3, :3] = R
-        c2w[:3, 3] = T
-        c2w[3, 3] = 1
-        w2c = np.linalg.inv(c2w)
-        R = np.transpose(w2c[:3,:3])
-        T = w2c[:3, 3]
-        new_cam_info = CameraInfo(uid=cam_info.uid, R=R, T=T, FovY=cam_info.FovY, FovX=cam_info.FovX, image=cam_info.image,
-                                  image_path=cam_info.image_path, image_name=cam_info.image_name, width=cam_info.width, height=cam_info.height, fid=cam_info.fid)
-        new_cam_infos.append(new_cam_info)
-    return result.t
+        transformed_cam_info = cam_info_from_RT(cam_info, new_colmap_traj[i], colmap_c2ws[i], result.t)
+        new_colmap_cam_info = cam_info_from_RT(cam_info, result.new_a[i], colmap_c2ws[i], np.eye(3, 3))
+        new_monst3r_cam_info = cam_info_from_RT(monst3r_infos[i], result.new_b[i], monst3r_c2ws[i], np.eye(3, 3))
+        transformed_cam_infos.append(transformed_cam_info)
+        new_colmap_cam_infos.append(new_colmap_cam_info)
+        new_monst3r_cam_infos.append(new_monst3r_cam_info)
 
-    # for i, T in enumerate(new_colmap_traj):
-    #     plot.add_mesh(pv.Sphere(radius=0.1, center=T), color='red')
-    #     up_vector = np.array([0, 0, 1])
-    #     direction = np.dot(colmap_c2ws[i][:3, :3] @ result.t.T, up_vector)
-    #     # plot.add_mesh(pv.Arrow(start=T, direction=np.dot(result.t, direction)), color='blue')
-    #     plot.add_mesh(pv.Arrow(start=T, direction=direction), color='green')
+    return transformed_cam_infos, result.t, scale, translation, new_colmap_cam_infos, new_monst3r_cam_infos
 
 
 def readMonST3RSceneInfo(path, eval, llffhold=2):
@@ -732,8 +740,8 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
                               monst3r_cam_info.image_path, monst3r_cam_info.image_name, monst3r_cam_info.width, monst3r_cam_info.height, monst3r_cam_info.fid)
         colmap_cam_infos.append(cam_info)
 
-    transformation = align_cam_infos(monst3r_cam_infos, colmap_cam_infos)
-    cam_infos = colmap_cam_infos
+    transformed_cam_infos, transformation, scale, translation, new_colmap_cam_infos, new_monst3r_cam_infos = align_cam_infos(monst3r_cam_infos, colmap_cam_infos)
+    cam_infos = transformed_cam_infos
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(cam_infos) if (idx + 1) % llffhold != 0]
@@ -746,17 +754,29 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
 
     points_path = os.path.join(path, 'points.ply')
     points = fetchPly(points_path)
-    xyz = np.dot(points.points, transformation.T)
-    points = BasicPointCloud(points=xyz, colors=points.colors, normals=points.normals)
+    normalized_xyz = scale * (points.points + translation)
+    normalized_points = BasicPointCloud(points=normalized_xyz, colors=points.colors, normals=points.normals)
+    transformed_xyz = np.dot(scale * (points.points + translation), transformation.T)
+    transformed_points = BasicPointCloud(points=transformed_xyz, colors=points.colors, normals=points.normals)
 
-    plot = pv.Plotter()
-    plot.add_points(points=points.points, scalars=points.colors, rgb=True)
-    plot_trajectory(plot, cam_infos)
+    plot = pv.Plotter(shape=(1, 2))
+    plot.subplot(0, 0)
+    plot.add_points(points=normalized_points.points, scalars=normalized_points.colors, rgb=True)
+    plot_trajectory(plot, new_monst3r_cam_infos, 'green', scale)
+    plot_trajectory(plot, new_colmap_cam_infos, 'red', scale)
+    plot.subplot(0, 1)
+    plot.add_points(points=normalized_points.points, scalars=normalized_points.colors, rgb=True)
+    plot_trajectory(plot, new_monst3r_cam_infos, 'green', scale)
+    plot_trajectory(plot, transformed_cam_infos, 'red', scale)
+    # plot.subplot(0, 2)
+    # plot.add_points(points=new_points.points, scalars=new_points.colors, rgb=True)
+    # plot_trajectory(plot, cam_infos, 'green')
     # plot_trajectory(plot, monst3r_cam_infos)
-    plot_trajectory(plot, colmap_cam_infos)
+    # plot_trajectory(plot, colmap_cam_infos)
+    plot.link_views()
     plot.show()
 
-    scene_info = SceneInfo(point_cloud=points,
+    scene_info = SceneInfo(point_cloud=normalized_points,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
