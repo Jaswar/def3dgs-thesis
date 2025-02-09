@@ -732,13 +732,26 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
     cameras_extrinsic_file = os.path.join(path, "images.bin")
     cam_extrinsics = read_extrinsics_binary(cameras_extrinsic_file)
     cam_extrinsics = sorted(cam_extrinsics.values(), key=lambda x: x.name)
+    cameras_intrinsic_file = os.path.join(path, "cameras.bin")
+    cam_intrinsics = read_intrinsics_binary(cameras_intrinsic_file)
 
     colmap_cam_infos = []
     for i, extr in enumerate(cam_extrinsics):
         R = np.transpose(qvec2rotmat(extr.qvec))
         T = extr.tvec
+        intr = cam_intrinsics[extr.camera_id]
+        if intr.model == "SIMPLE_PINHOLE":
+            focal_length_x = intr.params[0]
+            FovY = focal2fov(focal_length_x, intr.height)
+            FovX = focal2fov(focal_length_x, intr.width)
+        elif intr.model == "PINHOLE":
+            focal_length_x = intr.params[0]
+            focal_length_y = intr.params[1]
+            FovY = focal2fov(focal_length_y, intr.height)
+            FovX = focal2fov(focal_length_x, intr.width)
+
         monst3r_cam_info = monst3r_cam_infos[i]
-        cam_info = CameraInfo(monst3r_cam_info.uid, R, T, monst3r_cam_info.FovY, monst3r_cam_info.FovX, monst3r_cam_info.image, 
+        cam_info = CameraInfo(monst3r_cam_info.uid, R, T, FovY, FovX, monst3r_cam_info.image, 
                               monst3r_cam_info.image_path, monst3r_cam_info.image_name, monst3r_cam_info.width, monst3r_cam_info.height, monst3r_cam_info.fid)
         colmap_cam_infos.append(cam_info)
 
