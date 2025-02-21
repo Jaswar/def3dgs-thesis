@@ -52,6 +52,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
     best_iteration = 0
     progress_bar = tqdm(range(opt.iterations), desc="Training progress")
     smooth_term = get_linear_noise_func(lr_init=0.1, lr_final=1e-15, lr_delay_mult=0.01, max_steps=20000)
+    init_positions = scene.scene_flow[0]
     for iteration in range(1, opt.iterations + 1):
         if network_gui.conn == None:
             network_gui.try_connect()
@@ -88,7 +89,30 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
         fid = viewpoint_cam.fid
 
         if iteration < opt.warm_up:
-            d_xyz, d_rotation, d_scaling = 0.0, 0.0, 0.0
+            N = init_positions.shape[0]
+            time_input = fid.unsqueeze(0).expand(N, -1)
+
+            ast_noise = 0 if dataset.is_blender else torch.randn(1, 1, device='cuda').expand(N, -1) * time_interval * smooth_term(iteration)
+            d_xyz, _, _ = deform.step(init_positions, time_input + ast_noise)
+
+            # Render
+            scene_flow = scene.scene_flow[viewpoint_cam.uid]
+            gt_d_xyz = scene_flow - init_positions
+            scene_visibility = scene.scene_visibility[viewpoint_cam.uid]
+            gt_d_xyz = gt_d_xyz[scene_visibility]
+            d_xyz = d_xyz[scene_visibility]
+
+            motion_loss = (gt_d_xyz - d_xyz).pow(2).mean()
+
+            render_pkg_re = render(viewpoint_cam, gaussians, pipe, background, 0.0, 0.0, 0.0, dataset.is_6dof)
+            image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re[
+                "viewspace_points"], render_pkg_re["visibility_filter"], render_pkg_re["radii"]
+            # depth = render_pkg_re["depth"]
+
+            gt_image = viewpoint_cam.original_image.cuda()
+            Ll1 = l1_loss(image, gt_image)
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + 0.05 * motion_loss
+            loss.backward()
         else:
             N = gaussians.get_xyz.shape[0]
             time_input = fid.unsqueeze(0).expand(N, -1)
@@ -96,17 +120,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             ast_noise = 0 if dataset.is_blender else torch.randn(1, 1, device='cuda').expand(N, -1) * time_interval * smooth_term(iteration)
             d_xyz, d_rotation, d_scaling = deform.step(gaussians.get_xyz.detach(), time_input + ast_noise)
 
-        # Render
-        render_pkg_re = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_rotation, d_scaling, dataset.is_6dof)
-        image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re[
-            "viewspace_points"], render_pkg_re["visibility_filter"], render_pkg_re["radii"]
-        # depth = render_pkg_re["depth"]
+            # Render
+            render_pkg_re = render(viewpoint_cam, gaussians, pipe, background, d_xyz, d_rotation, d_scaling, dataset.is_6dof)
+            image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re[
+                "viewspace_points"], render_pkg_re["visibility_filter"], render_pkg_re["radii"]
+            # depth = render_pkg_re["depth"]
 
-        # Loss
-        gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        loss.backward()
+            # Loss
+            gt_image = viewpoint_cam.original_image.cuda()
+            Ll1 = l1_loss(image, gt_image)
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+            loss.backward()
 
         iter_end.record()
 

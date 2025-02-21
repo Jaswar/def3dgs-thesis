@@ -50,6 +50,8 @@ class SceneInfo(NamedTuple):
     test_cameras: list
     nerf_normalization: dict
     ply_path: str
+    scene_flow: np.array
+    scene_visibility: np.array
 
 
 def load_K_Rt_from_P(filename, P=None):
@@ -215,11 +217,18 @@ def readColmapSceneInfo(path, images, eval, llffhold=2):
     except:
         pcd = None
 
+    pcd = fetchPly(os.path.join(path, 'static_points.ply'))
+
+    scene_flow = np.load(os.path.join(path, 'scene_flow.npy'))
+    scene_visibility = np.load(os.path.join(path, 'scene_visibility.npy'))
+
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
                            test_cameras=test_cam_infos,
                            nerf_normalization=nerf_normalization,
-                           ply_path=ply_path)
+                           ply_path=ply_path,
+                           scene_flow=scene_flow,
+                           scene_visibility=scene_visibility)
     return scene_info
 
 

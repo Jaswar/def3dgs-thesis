@@ -18,6 +18,7 @@ from scene.gaussian_model import GaussianModel
 from scene.deform_model import DeformModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+import torch
 
 
 class Scene:
@@ -102,6 +103,9 @@ class Scene:
                                     og_number_points=len(scene_info.point_cloud.points))
         else:
             self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+        
+        self.scene_flow = torch.from_numpy(scene_info.scene_flow).to(args.data_device).float()
+        self.scene_visibility = torch.from_numpy(scene_info.scene_visibility).to(args.data_device).bool()
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "point_cloud/iteration_{}".format(iteration))
