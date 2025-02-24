@@ -13,6 +13,7 @@ from gaussian_renderer import GaussianModel
 import imageio
 import numpy as np
 import time
+import datetime
 from utils.image_utils import psnr
 import cv2 as cv
 import pygame as pg
@@ -59,6 +60,8 @@ class Visualizer(object):
         self.render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
         self.gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
         self.depth_path = os.path.join(model_path, name, "ours_{}".format(iteration), "depth")
+        self.recordings_path = os.path.join(model_path, name, "ours_{}".format(iteration), "recordings")
+        makedirs(self.recordings_path, exist_ok=True)
         self.views = views
         self.gaussians = gaussians
         self.pipeline = pipeline
@@ -87,16 +90,35 @@ class Visualizer(object):
         self.stop_following_button = pgui.elements.ui_button.UIButton(relative_rect=pg.Rect((0, 30), (200, 30)), text='Stop following', manager=self.manager)
         self.stop_following_button.disable()
 
+        self.play_button = pgui.elements.ui_button.UIButton(relative_rect=pg.Rect((0, 60), (200, 30)), text='Play', manager=self.manager)
+        self.is_playing = False
+        self.fps_label = pgui.elements.ui_label.UILabel(relative_rect=pg.Rect((0, 90), (50, 30)), text='FPS: ', manager=self.manager)
+        self.fps_text_box = pgui.elements.ui_text_entry_line.UITextEntryLine(relative_rect=pg.Rect((50, 90), (150, 30)), manager=self.manager)
+        self.fps_text_box.set_text('30')
+        self.record_button = pgui.elements.ui_button.UIButton(relative_rect=pg.Rect((0, 120), (200, 30)), text='Record', manager=self.manager)
+        self.is_recording = False
+
         self.mouse_wheel_pressed = False
         self.right_button_pressed = False
         self.prev_mouse_x, self.prev_mouse_y = 0, 0
 
+    def save_recording(self, frames, fps):
+        now = datetime.datetime.now()
+        current_time = now.strftime("%Y-%m-%d_%H-%M-%S")
+        filename = os.path.join(self.recordings_path, f'recording_{current_time}.mp4')
+        fourcc = cv.VideoWriter_fourcc(*'MP4V')
+        writer = cv.VideoWriter(filename, fourcc, fps, (frames[0].shape[1], frames[0].shape[0]))
+        for frame in frames:
+            frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
+            writer.write(frame)
+        writer.release()
+        print(f"Recording saved to {filename}")
 
     def run(self):
         running = True
         base_view = self.views[0]
+        frames = []
         while running:
-            time_delta = self.clock.tick() / 1000.0
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     running = False
@@ -136,16 +158,23 @@ class Visualizer(object):
                         self.follow_camera = False
                         self.stop_following_button.disable()
                         self.follow_camera_button.enable()
+                    elif event.ui_element == self.play_button:
+                        self.is_playing = not self.is_playing
+                    elif event.ui_element == self.record_button:
+                        self.is_playing = True
+                        self.is_recording = not self.is_recording
+                        self.current_idx = 0
+                        frames = []
                 self.manager.process_events(event)
+
+            if self.is_playing:
+                fps = int(self.fps_text_box.get_text())
+                time_delta = self.clock.tick(fps) / 1000.0
+            else:
+                time_delta = self.clock.tick() / 1000.0
 
             self.current_frame_label.set_text(f'Current frame: {self.current_idx + 1}/{len(self.views)}')
             self.manager.update(time_delta)
-
-            keys = pg.key.get_pressed()
-            if keys[pg.K_RIGHT]:
-                self.current_idx = (self.current_idx + 1) % len(self.views)
-            if keys[pg.K_LEFT]:
-                self.current_idx = (self.current_idx - 1) % len(self.views)
 
             if self.follow_camera:
                 self.zoom = 0
@@ -169,11 +198,27 @@ class Visualizer(object):
             rendering = rendering.cpu().numpy().transpose(1, 2, 0)
             rendering = np.clip(rendering, 0, 1)
             rendering = (rendering * 255).astype(np.uint8)
+            if self.is_recording:
+                frames.append(rendering)
             rendering = cv.resize(rendering, (self.width, self.height))
             rendering = np.transpose(rendering, (1, 0, 2))
 
             self.screen.blit(pg.surfarray.make_surface(rendering), (0, 0))
             self.manager.draw_ui(self.screen)
+
+            if self.current_idx == len(self.views) - 1 and self.is_recording:
+                self.is_recording = False
+                self.is_playing = False
+                assert len(frames) == len(self.views), f'{len(frames)=}, {len(self.views)=}'
+                self.save_recording(frames, fps)
+            if self.is_playing:
+                self.current_idx = (self.current_idx + 1) % len(self.views)
+            
+            keys = pg.key.get_pressed()
+            if keys[pg.K_RIGHT]:
+                self.current_idx = (self.current_idx + 1) % len(self.views)
+            if keys[pg.K_LEFT]:
+                self.current_idx = (self.current_idx - 1) % len(self.views)
 
             pg.display.flip()
         pg.quit() 
