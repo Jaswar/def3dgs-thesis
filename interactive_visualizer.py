@@ -21,7 +21,7 @@ import pygame_gui as pgui
 from scene.cameras import Camera
 
 
-def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, pan_x, pan_y):
+def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, rot_z, pan_x, pan_y):
     w2c = np.eye(4)
     w2c[:3, :3] = R
     w2c[:3, 3] = T
@@ -41,7 +41,14 @@ def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, pan_x, pan_y):
         [0, np.sin(rot_y), np.cos(rot_y)]
     ])
 
-    rotation = rot_yaw @ rot_pitch
+    rot_roll = np.eye(4)
+    rot_roll[:3, :3] = np.array([
+        [np.cos(rot_z), -np.sin(rot_z), 0],
+        [np.sin(rot_z), np.cos(rot_z), 0],
+        [0, 0, 1]
+    ])
+
+    rotation = rot_roll @ rot_yaw @ rot_pitch
     c2w = rotation @ c2w
     c2w_t = c2w[:3, 3]
     c2w_R = c2w[:3, :3]
@@ -77,7 +84,7 @@ class Visualizer(object):
 
         self.mouse_x, self.mouse_y = 0, 0
         self.zoom = 0
-        self.rot_x, self.rot_y = 0, 0
+        self.rot_x, self.rot_y, self.rot_z = 0, 0, 0
         self.pan_x, self.pan_y = 0, 0
 
         pg.init()
@@ -105,6 +112,7 @@ class Visualizer(object):
 
         self.mouse_wheel_pressed = False
         self.right_button_pressed = False
+        self.left_button_pressed = False
         self.prev_mouse_x, self.prev_mouse_y = 0, 0
 
     def save_recording(self, frames, fps):
@@ -126,7 +134,7 @@ class Visualizer(object):
         while running:
             self.zoom = 0
             self.pan_x, self.pan_y = 0, 0
-            self.rot_x, self.rot_y = 0, 0
+            self.rot_x, self.rot_y, self.rot_z = 0, 0, 0
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     running = False
@@ -141,11 +149,17 @@ class Visualizer(object):
                         self.right_button_pressed = True
                         self.prev_mouse_x = event.pos[0]
                         self.prev_mouse_y = event.pos[1]
+                    elif event.button == 1:
+                        self.left_button_pressed = True
+                        self.prev_mouse_x = event.pos[0]
+                        self.prev_mouse_y = event.pos[1]
                 elif event.type == pg.MOUSEBUTTONUP:
                     if event.button == 2:
                         self.mouse_wheel_pressed = False
                     elif event.button == 3:
                         self.right_button_pressed = False
+                    elif event.button == 1:
+                        self.left_button_pressed = False
                 elif event.type == pg.MOUSEMOTION:
                     if self.mouse_wheel_pressed:
                         self.rot_x = -(event.pos[0] - self.prev_mouse_x) / (self.width / 2) * np.pi / 8 * 30
@@ -155,6 +169,10 @@ class Visualizer(object):
                     elif self.right_button_pressed:
                         self.pan_x = -(event.pos[0] - self.prev_mouse_x) / (self.width / 2) * 40
                         self.pan_y = -(event.pos[1] - self.prev_mouse_y) / (self.height / 2) * 40
+                        self.prev_mouse_x = event.pos[0]
+                        self.prev_mouse_y = event.pos[1]
+                    elif self.left_button_pressed:
+                        self.rot_z = -(event.pos[1] - self.prev_mouse_y) / (self.width / 2) * np.pi / 8 * 30
                         self.prev_mouse_x = event.pos[0]
                         self.prev_mouse_y = event.pos[1]
                 elif event.type == pgui.UI_BUTTON_PRESSED:
@@ -187,12 +205,12 @@ class Visualizer(object):
 
             if self.follow_camera:
                 self.zoom = 0
-                self.rot_x, self.rot_y = 0, 0
+                self.rot_x, self.rot_y, self.rot_z = 0, 0, 0
                 self.pan_x, self.pan_y = 0, 0
                 view = get_copy(self.views[self.current_idx])
                 new_t, new_r = view.T, view.R
             else:
-                new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom, self.rot_x, self.rot_y, self.pan_x, self.pan_y)
+                new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom, self.rot_x, self.rot_y, self.rot_z, self.pan_x, self.pan_y)
             view.T = new_t
             view.R = new_r
             view.reset_extrinsic(new_r, new_t)
@@ -219,6 +237,7 @@ class Visualizer(object):
                 self.is_recording = False
                 self.is_playing = False
                 assert len(frames) == len(self.views), f'{len(frames)=}, {len(self.views)=}'
+                fps = int(self.fps_text_box.get_text())
                 self.save_recording(frames, fps)
                 self.play_button.enable()
             if self.is_playing:
