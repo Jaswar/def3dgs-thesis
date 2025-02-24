@@ -15,6 +15,22 @@ import numpy as np
 import time
 from utils.image_utils import psnr
 import cv2 as cv
+import pygame as pg
+
+
+def get_new_camera_extrinsic(T, R, zoom):
+    w2c = np.eye(4)
+    w2c[:3, :3] = R
+    w2c[:3, 3] = T
+    c2w = np.linalg.inv(w2c)
+    c2w_t = c2w[:3, 3]
+    c2w_R = c2w[:3, :3]
+    c2w_t = c2w_t + zoom * c2w_R @ np.array([0, 0, 1])
+    c2w = np.eye(4)
+    c2w[:3, :3] = c2w_R
+    c2w[:3, 3] = c2w_t
+    w2c = np.linalg.inv(c2w)
+    return w2c[:3, 3], w2c[:3, :3]
 
 
 class Visualizer(object):
@@ -33,42 +49,47 @@ class Visualizer(object):
 
         self.mouse_x, self.mouse_y = 0, 0
         self.zoom = 0
-        cv.namedWindow('visualization')
-        cv.setMouseCallback('visualization', self.mouse_callback)
-
-    def mouse_callback(self, event, x, y, flags, param):
-        self.mouse_x, self.mouse_y = x, y
-        if event == cv.EVENT_MOUSEWHEEL:
-            self.zoom += -1 if flags > 0 else 1
+        pg.init()
+        self.width = self.views[0].image_width * 5
+        self.height = self.views[0].image_height * 5
+        self.screen = pg.display.set_mode((self.width, self.height))
 
     def run(self):
-        while True:
-            view = self.views[0]
-            new_t = view.T + self.zoom * view.R @ np.array([0, 0, -1])
-            view.reset_extrinsic(view.R, new_t)
-            print(new_t, self.zoom)
-
-            key = cv.waitKey(1) & 0xFF
-            if key == 83:
-                self.current_idx += 1
-                self.current_idx = min(self.current_idx, len(self.views) - 1)
-            elif key == 81:
-                self.current_idx -= 1
-                self.current_idx = max(self.current_idx, 0)
-            elif key == ord('q'):
-                break
+        running = True
+        while running:
+            for event in pg.event.get():
+                if event.type == pg.QUIT:
+                    running = False
+                if event.type == pg.MOUSEWHEEL:
+                    self.zoom += event.y
             
+            keys = pg.key.get_pressed()
+            if keys[pg.K_RIGHT]:
+                self.current_idx = (self.current_idx + 1) % len(self.views)
+            if keys[pg.K_LEFT]:
+                self.current_idx = (self.current_idx - 1) % len(self.views)
+
+            self.screen.fill("purple")
+            view = self.views[0]
+            new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom)
+            view.reset_extrinsic(new_r, new_t)
+
             fid = self.views[self.current_idx].fid
             xyz = self.gaussians.get_xyz
             time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
             d_xyz, d_rotation, d_scaling = self.deform.step(xyz.detach(), time_input)
             results = render(view, self.gaussians, self.pipeline, self.background, d_xyz, d_rotation, d_scaling, self.is_6dof)
-            rendering = torch.clip(results["render"].permute(1, 2, 0), 0, 1).cpu().numpy()
-            rendering = cv.cvtColor((rendering * 255).astype(np.uint8), cv.COLOR_RGB2BGR)
-            rendering = cv.resize(rendering, (rendering.shape[1] * 5, rendering.shape[0] * 5))
-            cv.imshow('visualization', rendering)
+            rendering = results["render"]
+            rendering = rendering.cpu().numpy().transpose(1, 2, 0)
+            rendering = np.clip(rendering, 0, 1)
+            rendering = (rendering * 255).astype(np.uint8)
+            rendering = cv.resize(rendering, (self.width, self.height))
+            rendering = np.transpose(rendering, (1, 0, 2))
 
-        cv.destroyAllWindows()
+            self.screen.blit(pg.surfarray.make_surface(rendering), (0, 0))
+
+            pg.display.flip()
+        pg.quit() 
 
 
 
