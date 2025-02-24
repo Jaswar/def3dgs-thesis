@@ -217,7 +217,7 @@ def readColmapSceneInfo(path, images, eval, llffhold=2):
     except:
         pcd = None
 
-    pcd = fetchPly(os.path.join(path, 'static_points.ply'))
+    pcd = fetchPly(os.path.join(path, 'all_points.ply'))
 
     scene_flow = np.load(os.path.join(path, 'scene_flow.npy'))
     scene_visibility = np.load(os.path.join(path, 'scene_visibility.npy'))

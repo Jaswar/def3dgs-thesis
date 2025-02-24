@@ -101,8 +101,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             scene_visibility = scene.scene_visibility[viewpoint_cam.uid]
             gt_d_xyz = gt_d_xyz[scene_visibility]
             d_xyz = d_xyz[scene_visibility]
-
-            motion_loss = (gt_d_xyz - d_xyz).pow(2).mean()
+            motion_loss = torch.tensor(0.0, device='cuda')
+            if scene_visibility.sum() > 0:
+                motion_loss = (gt_d_xyz - d_xyz).pow(2).mean()
 
             render_pkg_re = render(viewpoint_cam, gaussians, pipe, background, 0.0, 0.0, 0.0, dataset.is_6dof)
             image, viewspace_point_tensor, visibility_filter, radii = render_pkg_re["render"], render_pkg_re[
@@ -111,7 +112,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             gt_image = viewpoint_cam.original_image.cuda()
             Ll1 = l1_loss(image, gt_image)
-            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) + 0.05 * motion_loss
+            loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image)) #+ 0.05 * motion_loss
             loss.backward()
         else:
             N = gaussians.get_xyz.shape[0]
