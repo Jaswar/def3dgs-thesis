@@ -18,14 +18,35 @@ import cv2 as cv
 import pygame as pg
 
 
-def get_new_camera_extrinsic(T, R, zoom):
+def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, p, pan_x, pan_y):
+    if p is None:
+        return T, R
     w2c = np.eye(4)
     w2c[:3, :3] = R
     w2c[:3, 3] = T
     c2w = np.linalg.inv(w2c)
+
+    rot_yaw = np.eye(4)
+    rot_yaw[:3, :3] = np.array([
+        [np.cos(rot_x), 0, np.sin(rot_x)],
+        [0, 1, 0],
+        [-np.sin(rot_x), 0, np.cos(rot_x)]
+    ])
+
+    rot_pitch = np.eye(4)
+    rot_pitch[:3, :3] = np.array([
+        [1, 0, 0],
+        [0, np.cos(rot_y), -np.sin(rot_y)],
+        [0, np.sin(rot_y), np.cos(rot_y)]
+    ])
+
+    rotation = rot_yaw @ rot_pitch
+    c2w = rotation @ c2w
     c2w_t = c2w[:3, 3]
     c2w_R = c2w[:3, :3]
     c2w_t = c2w_t + zoom * c2w_R @ np.array([0, 0, 1])
+    c2w_t = c2w_t + pan_x * c2w_R @ np.array([1, 0, 0])
+    c2w_t = c2w_t + pan_y * c2w_R @ np.array([0, 1, 0])
     c2w = np.eye(4)
     c2w[:3, :3] = c2w_R
     c2w[:3, 3] = c2w_t
@@ -49,10 +70,18 @@ class Visualizer(object):
 
         self.mouse_x, self.mouse_y = 0, 0
         self.zoom = 0
+        self.rot_x, self.rot_y = 0, 0
+        self.pan_x, self.pan_y = 0, 0
         pg.init()
         self.width = self.views[0].image_width * 5
         self.height = self.views[0].image_height * 5
         self.screen = pg.display.set_mode((self.width, self.height))
+
+        self.mouse_wheel_pressed = False
+        self.right_button_pressed = False
+        self.prev_mouse_x, self.prev_mouse_y = 0, 0
+
+        self.trackball_position = None
 
     def run(self):
         running = True
@@ -60,9 +89,35 @@ class Visualizer(object):
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     running = False
-                if event.type == pg.MOUSEWHEEL:
+                elif event.type == pg.MOUSEWHEEL:
                     self.zoom += event.y
-            
+                elif event.type == pg.MOUSEBUTTONDOWN:
+                    if event.button == 2:  # scroll wheel press
+                        self.mouse_wheel_pressed = True
+                        self.prev_mouse_x = event.pos[0]
+                        self.prev_mouse_y = event.pos[1]
+                    elif event.button == 3:
+                        self.right_button_pressed = True
+                        self.prev_mouse_x = event.pos[0]
+                        self.prev_mouse_y = event.pos[1]
+                elif event.type == pg.MOUSEBUTTONUP:
+                    if event.button == 2:
+                        self.mouse_wheel_pressed = False
+                    elif event.button == 3:
+                        self.right_button_pressed = False
+                elif event.type == pg.MOUSEMOTION:
+                    if self.mouse_wheel_pressed:
+                        self.rot_x -= (event.pos[0] - self.prev_mouse_x) / (self.width / 2) * np.pi / 8
+                        self.rot_y += (event.pos[1] - self.prev_mouse_y) / (self.height / 2) * np.pi / 8
+                        self.prev_mouse_x = event.pos[0]
+                        self.prev_mouse_y = event.pos[1]
+                    elif self.right_button_pressed:
+                        self.pan_x -= (event.pos[0] - self.prev_mouse_x) / (self.width / 2)
+                        self.pan_y -= (event.pos[1] - self.prev_mouse_y) / (self.height / 2)
+                        self.prev_mouse_x = event.pos[0]
+                        self.prev_mouse_y = event.pos[1]
+                    
+
             keys = pg.key.get_pressed()
             if keys[pg.K_RIGHT]:
                 self.current_idx = (self.current_idx + 1) % len(self.views)
@@ -71,7 +126,7 @@ class Visualizer(object):
 
             self.screen.fill("purple")
             view = self.views[0]
-            new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom)
+            new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom, self.rot_x, self.rot_y, self.trackball_position, self.pan_x, self.pan_y)
             view.reset_extrinsic(new_r, new_t)
 
             fid = self.views[self.current_idx].fid
@@ -79,6 +134,10 @@ class Visualizer(object):
             time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
             d_xyz, d_rotation, d_scaling = self.deform.step(xyz.detach(), time_input)
             results = render(view, self.gaussians, self.pipeline, self.background, d_xyz, d_rotation, d_scaling, self.is_6dof)
+
+            if self.trackball_position is None:
+                self.trackball_position = torch.mean(self.gaussians.get_xyz + d_xyz, dim=0).cpu().numpy()
+
             rendering = results["render"]
             rendering = rendering.cpu().numpy().transpose(1, 2, 0)
             rendering = np.clip(rendering, 0, 1)
