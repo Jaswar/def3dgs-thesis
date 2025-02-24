@@ -16,11 +16,10 @@ import time
 from utils.image_utils import psnr
 import cv2 as cv
 import pygame as pg
+import pygame_gui as pgui
 
 
-def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, p, pan_x, pan_y):
-    if p is None:
-        return T, R
+def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, pan_x, pan_y):
     w2c = np.eye(4)
     w2c[:3, :3] = R
     w2c[:3, 3] = T
@@ -72,20 +71,32 @@ class Visualizer(object):
         self.zoom = 0
         self.rot_x, self.rot_y = 0, 0
         self.pan_x, self.pan_y = 0, 0
+
         pg.init()
-        self.width = self.views[0].image_width * 5
-        self.height = self.views[0].image_height * 5
+        display = pg.display.Info()
+        self.width = display.current_w
+        self.height = int(self.views[0].image_height / self.views[0].image_width * self.width)
         self.screen = pg.display.set_mode((self.width, self.height))
+        self.manager = pgui.UIManager((self.width, self.height))
+        self.clock = pg.time.Clock()
+
+        self.current_frame_label = pgui.elements.ui_label.UILabel(relative_rect=pg.Rect((0, self.height - 30), (200, 30)), text=f'Current frame: 0/{len(self.views)}', manager=self.manager)
+
+        self.follow_camera = False
+        self.follow_camera_button = pgui.elements.ui_button.UIButton(relative_rect=pg.Rect((0, 0), (200, 30)), text='Follow camera', manager=self.manager)
+        self.stop_following_button = pgui.elements.ui_button.UIButton(relative_rect=pg.Rect((0, 30), (200, 30)), text='Stop following', manager=self.manager)
+        self.stop_following_button.disable()
 
         self.mouse_wheel_pressed = False
         self.right_button_pressed = False
         self.prev_mouse_x, self.prev_mouse_y = 0, 0
 
-        self.trackball_position = None
 
     def run(self):
         running = True
+        base_view = self.views[0]
         while running:
+            time_delta = self.clock.tick() / 1000.0
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     running = False
@@ -116,7 +127,19 @@ class Visualizer(object):
                         self.pan_y -= (event.pos[1] - self.prev_mouse_y) / (self.height / 2)
                         self.prev_mouse_x = event.pos[0]
                         self.prev_mouse_y = event.pos[1]
-                    
+                elif event.type == pgui.UI_BUTTON_PRESSED:
+                    if event.ui_element == self.follow_camera_button:
+                        self.follow_camera = True
+                        self.stop_following_button.enable()
+                        self.follow_camera_button.disable()
+                    elif event.ui_element == self.stop_following_button:
+                        self.follow_camera = False
+                        self.stop_following_button.disable()
+                        self.follow_camera_button.enable()
+                self.manager.process_events(event)
+
+            self.current_frame_label.set_text(f'Current frame: {self.current_idx + 1}/{len(self.views)}')
+            self.manager.update(time_delta)
 
             keys = pg.key.get_pressed()
             if keys[pg.K_RIGHT]:
@@ -124,9 +147,16 @@ class Visualizer(object):
             if keys[pg.K_LEFT]:
                 self.current_idx = (self.current_idx - 1) % len(self.views)
 
-            self.screen.fill("purple")
-            view = self.views[0]
-            new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom, self.rot_x, self.rot_y, self.trackball_position, self.pan_x, self.pan_y)
+            if self.follow_camera:
+                self.zoom = 0
+                self.rot_x, self.rot_y = 0, 0
+                self.pan_x, self.pan_y = 0, 0
+                base_view = self.views[self.current_idx]
+                view = base_view
+                new_t, new_r = base_view.T, base_view.R
+            else:
+                view = base_view
+                new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom, self.rot_x, self.rot_y, self.pan_x, self.pan_y)
             view.reset_extrinsic(new_r, new_t)
 
             fid = self.views[self.current_idx].fid
@@ -134,9 +164,6 @@ class Visualizer(object):
             time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
             d_xyz, d_rotation, d_scaling = self.deform.step(xyz.detach(), time_input)
             results = render(view, self.gaussians, self.pipeline, self.background, d_xyz, d_rotation, d_scaling, self.is_6dof)
-
-            if self.trackball_position is None:
-                self.trackball_position = torch.mean(self.gaussians.get_xyz + d_xyz, dim=0).cpu().numpy()
 
             rendering = results["render"]
             rendering = rendering.cpu().numpy().transpose(1, 2, 0)
@@ -146,6 +173,7 @@ class Visualizer(object):
             rendering = np.transpose(rendering, (1, 0, 2))
 
             self.screen.blit(pg.surfarray.make_surface(rendering), (0, 0))
+            self.manager.draw_ui(self.screen)
 
             pg.display.flip()
         pg.quit() 
