@@ -18,6 +18,7 @@ from utils.image_utils import psnr
 import cv2 as cv
 import pygame as pg
 import pygame_gui as pgui
+from scene.cameras import Camera
 
 
 def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, pan_x, pan_y):
@@ -52,6 +53,10 @@ def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, pan_x, pan_y):
     c2w[:3, 3] = c2w_t
     w2c = np.linalg.inv(c2w)
     return w2c[:3, 3], w2c[:3, :3]
+
+
+def get_copy(view):
+    return Camera(view.colmap_id, view.R, view.T, view.FoVx, view.FoVy, view.image, None, view.image_name, view.uid, fid=view._fid)
 
 
 class Visualizer(object):
@@ -116,14 +121,17 @@ class Visualizer(object):
 
     def run(self):
         running = True
-        base_view = self.views[0]
+        view = get_copy(self.views[0])
         frames = []
         while running:
+            self.zoom = 0
+            self.pan_x, self.pan_y = 0, 0
+            self.rot_x, self.rot_y = 0, 0
             for event in pg.event.get():
                 if event.type == pg.QUIT:
                     running = False
                 elif event.type == pg.MOUSEWHEEL:
-                    self.zoom += event.y
+                    self.zoom = event.y
                 elif event.type == pg.MOUSEBUTTONDOWN:
                     if event.button == 2:  # scroll wheel press
                         self.mouse_wheel_pressed = True
@@ -140,13 +148,13 @@ class Visualizer(object):
                         self.right_button_pressed = False
                 elif event.type == pg.MOUSEMOTION:
                     if self.mouse_wheel_pressed:
-                        self.rot_x -= (event.pos[0] - self.prev_mouse_x) / (self.width / 2) * np.pi / 8
-                        self.rot_y += (event.pos[1] - self.prev_mouse_y) / (self.height / 2) * np.pi / 8
+                        self.rot_x = -(event.pos[0] - self.prev_mouse_x) / (self.width / 2) * np.pi / 8 * 30
+                        self.rot_y = (event.pos[1] - self.prev_mouse_y) / (self.height / 2) * np.pi / 8 * 30
                         self.prev_mouse_x = event.pos[0]
                         self.prev_mouse_y = event.pos[1]
                     elif self.right_button_pressed:
-                        self.pan_x -= (event.pos[0] - self.prev_mouse_x) / (self.width / 2)
-                        self.pan_y -= (event.pos[1] - self.prev_mouse_y) / (self.height / 2)
+                        self.pan_x = -(event.pos[0] - self.prev_mouse_x) / (self.width / 2) * 40
+                        self.pan_y = -(event.pos[1] - self.prev_mouse_y) / (self.height / 2) * 40
                         self.prev_mouse_x = event.pos[0]
                         self.prev_mouse_y = event.pos[1]
                 elif event.type == pgui.UI_BUTTON_PRESSED:
@@ -162,6 +170,7 @@ class Visualizer(object):
                         self.is_playing = not self.is_playing
                     elif event.ui_element == self.record_button:
                         self.is_playing = True
+                        self.play_button.disable()
                         self.is_recording = not self.is_recording
                         self.current_idx = 0
                         frames = []
@@ -180,12 +189,12 @@ class Visualizer(object):
                 self.zoom = 0
                 self.rot_x, self.rot_y = 0, 0
                 self.pan_x, self.pan_y = 0, 0
-                base_view = self.views[self.current_idx]
-                view = base_view
-                new_t, new_r = base_view.T, base_view.R
+                view = get_copy(self.views[self.current_idx])
+                new_t, new_r = view.T, view.R
             else:
-                view = base_view
                 new_t, new_r = get_new_camera_extrinsic(view.T, view.R, self.zoom, self.rot_x, self.rot_y, self.pan_x, self.pan_y)
+            view.T = new_t
+            view.R = new_r
             view.reset_extrinsic(new_r, new_t)
 
             fid = self.views[self.current_idx].fid
@@ -211,6 +220,7 @@ class Visualizer(object):
                 self.is_playing = False
                 assert len(frames) == len(self.views), f'{len(frames)=}, {len(self.views)=}'
                 self.save_recording(frames, fps)
+                self.play_button.enable()
             if self.is_playing:
                 self.current_idx = (self.current_idx + 1) % len(self.views)
             
