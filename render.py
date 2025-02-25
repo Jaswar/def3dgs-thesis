@@ -39,9 +39,6 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
 
     images = torch.tensor([], device="cuda")
     gts = torch.tensor([], device="cuda")
-    v = views[0]
-    new_t = v.T - v.R @ np.array([0.0, 0.0, -1.0])
-    v.reset_extrinsic(v.R, new_t)
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         if load2gpu_on_the_fly:
             view.load2device()
@@ -49,7 +46,7 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
         xyz = gaussians.get_xyz
         time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
         d_xyz, d_rotation, d_scaling = deform.step(xyz.detach(), time_input)
-        results = render(v, gaussians, pipeline, background, d_xyz, d_rotation, d_scaling, is_6dof)
+        results = render(view, gaussians, pipeline, background, d_xyz, d_rotation, d_scaling, is_6dof)
         rendering = results["render"]
         images = torch.cat([images, rendering.unsqueeze(0)], 0)
         depth = results["depth"]
