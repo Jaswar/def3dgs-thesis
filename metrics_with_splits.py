@@ -78,62 +78,60 @@ def evaluate(source_paths, model_paths):
     dynamic_lpipss = []
     assert len(source_paths) == len(model_paths), f'Number of source paths ({len(source_paths)}) must match number of model paths ({len(model_paths)})'
     for (source_path, model_path) in zip(source_paths, model_paths):
-        try:
-            print("Scene:", model_path)
-            full_dict[model_path] = {}
-            per_view_dict[model_path] = {}
-            full_dict_polytopeonly[model_path] = {}
-            per_view_dict_polytopeonly[model_path] = {}
+        print("Scene:", model_path)
+        full_dict[model_path] = {}
+        per_view_dict[model_path] = {}
+        full_dict_polytopeonly[model_path] = {}
+        per_view_dict_polytopeonly[model_path] = {}
 
-            with open(os.path.join(source_path, 'split', 'phase_frame_index.txt'), 'r') as f:
-                splits = f.read().split('\n')
-            splits = [list(map(int, split.split(','))) for split in splits]
-            with open(os.path.join(source_path, 'frames.txt'), 'r') as f:
-                frames_indices = f.read().strip().split('-')
-            frames_indices = (int(frames_indices[0]), int(frames_indices[1]))
-            all_indices = list(range(frames_indices[0], frames_indices[1] + 1))
-            testing_indices = all_indices[1::2]
+        with open(os.path.join(source_path, 'split', 'phase_frame_index.txt'), 'r') as f:
+            splits = f.read().split('\n')
+        splits = [list(map(int, split.split(','))) for split in splits]
+        with open(os.path.join(source_path, 'frames.txt'), 'r') as f:
+            frames_indices = f.read().strip().split('-')
+        frames_indices = (int(frames_indices[0]), int(frames_indices[1]))
+        all_indices = list(range(frames_indices[0], frames_indices[1] + 1))
+        testing_indices = all_indices[1::2]
 
-            test_dir = Path(model_path) / "test"
+        test_dir = Path(model_path) / "test"
 
-            for method in os.listdir(test_dir):
-                if not method.startswith("ours"):
-                    continue
-                print("Method:", method)
+        for method in os.listdir(test_dir):
+            if not method.startswith("ours"):
+                continue
+            if not method.endswith('40000'):
+                continue
+            print("Method:", method)
 
-                full_dict[model_path][method] = {}
-                per_view_dict[model_path][method] = {}
-                full_dict_polytopeonly[model_path][method] = {}
-                per_view_dict_polytopeonly[model_path][method] = {}
+            full_dict[model_path][method] = {}
+            per_view_dict[model_path][method] = {}
+            full_dict_polytopeonly[model_path][method] = {}
+            per_view_dict_polytopeonly[model_path][method] = {}
 
-                method_dir = test_dir / method
-                gt_dir = method_dir / "gt"
-                renders_dir = method_dir / "renders"
-                renders, gts, image_names = readImages(renders_dir, gt_dir)
+            method_dir = test_dir / method
+            gt_dir = method_dir / "gt"
+            renders_dir = method_dir / "renders"
+            renders, gts, image_names = readImages(renders_dir, gt_dir)
 
-                static_ssim, static_psnr, static_lpips = compute_metrics(renders, gts, testing_indices, splits, static_eval=True)
-                dynamic_ssim, dynamic_psnr, dynamic_lpips = compute_metrics(renders, gts, testing_indices, splits, static_eval=False)
+            static_ssim, static_psnr, static_lpips = compute_metrics(renders, gts, testing_indices, splits, static_eval=True)
+            dynamic_ssim, dynamic_psnr, dynamic_lpips = compute_metrics(renders, gts, testing_indices, splits, static_eval=False)
 
-                print("Static evaluation:")
-                print("  SSIM : {:>12.7f}".format(static_ssim.item(), ".5"))
-                print("  PSNR : {:>12.7f}".format(static_psnr.item(), ".5"))
-                print("  LPIPS: {:>12.7f}".format(static_lpips.item(), ".5"))
-                print("")
-                print("Dynamic evaluation:")
-                print("  SSIM : {:>12.7f}".format(dynamic_ssim.item(), ".5"))
-                print("  PSNR : {:>12.7f}".format(dynamic_psnr.item(), ".5"))
-                print("  LPIPS: {:>12.7f}".format(dynamic_lpips.item(), ".5"))
-                print("")
+            print("Static evaluation:")
+            print("  SSIM : {:>12.7f}".format(static_ssim.item(), ".5"))
+            print("  PSNR : {:>12.7f}".format(static_psnr.item(), ".5"))
+            print("  LPIPS: {:>12.7f}".format(static_lpips.item(), ".5"))
+            print("")
+            print("Dynamic evaluation:")
+            print("  SSIM : {:>12.7f}".format(dynamic_ssim.item(), ".5"))
+            print("  PSNR : {:>12.7f}".format(dynamic_psnr.item(), ".5"))
+            print("  LPIPS: {:>12.7f}".format(dynamic_lpips.item(), ".5"))
+            print("")
 
-                static_ssims.append(static_ssim)
-                static_psnrs.append(static_psnr)
-                static_lpipss.append(static_lpips)
-                dynamic_ssims.append(dynamic_ssim)
-                dynamic_psnrs.append(dynamic_psnr)
-                dynamic_lpipss.append(dynamic_lpips)
-        except Exception as e:
-            print(e)
-            print("Unable to compute metrics for model", model_path)
+            static_ssims.append(static_ssim)
+            static_psnrs.append(static_psnr)
+            static_lpipss.append(static_lpips)
+            dynamic_ssims.append(dynamic_ssim)
+            dynamic_psnrs.append(dynamic_psnr)
+            dynamic_lpipss.append(dynamic_lpips)
 
     print("Static evaluation:")
     print("  SSIM : {:>12.7f}".format(torch.tensor(static_ssims).mean().item(), ".5"))
