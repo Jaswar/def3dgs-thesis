@@ -62,6 +62,9 @@ class Scene:
         elif os.path.exists(os.path.join(args.source_path, 'pred_traj.txt')):
             print(f'Found pred_traj.txt file, assuming MonST3R data set!')
             scene_info = sceneLoadTypeCallbacks["MonST3R"](args.source_path, args.eval)
+        elif os.path.exists(os.path.join(args.source_path, 'trajectory.txt')):
+            print(f'Found trajectory.txt file, assuming EgoExo data set!')
+            scene_info = sceneLoadTypeCallbacks["EgoExo"](args.source_path, args.eval)
         else:
             assert False, "Could not recognize scene type!"
 

@@ -677,11 +677,76 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
     return scene_info
 
 
+def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path):
+    with open(intrinsics_path, 'r') as f:
+        intrinsics = f.read().split('\n')
+    intrinsics = [line for line in intrinsics if line != ''][1:]
+    intrinsics = list(map(float, intrinsics[0].split(' ')))
+    fx, fy, cx, cy = intrinsics
+
+    with open(extrinsics_path, 'r') as f:
+        extrinsics = f.read().split('\n')
+    extrinsics = [line for line in extrinsics if line != ''][1:]
+    extrinsics = [list(map(float, line.split(' '))) for line in extrinsics]
+
+    images = [Image.open(os.path.join(images_path, img)) for img in sorted(os.listdir(images_path))]
+    assert len(extrinsics) == len(images), f'{len(extrinsics)=} != {len(images)=}'
+
+    cam_infos = []
+    width, height = images[0].size
+    for i, (extrs, img) in enumerate(zip(extrinsics, images)):
+        # extrs: QW, QX, QY, QZ, X, Y, Z
+        qvec = extrs[:4]
+        tvec = extrs[4:]
+
+        R = np.transpose(qvec2rotmat(qvec))
+        T = np.array(tvec)
+        fovx = focal2fov(fx, width)
+        fovy = focal2fov(fy, height)
+
+        img_name = f'{i:05d}'
+        img_path = os.path.join(images_path, f'{img_name}.png')
+        fid = i / (len(images) - 1)
+        cam_info = CameraInfo(uid=i, R=R, T=T, FovY=fovy, FovX=fovx, image=img,
+                              image_path=img_path, image_name=img_name, width=width, height=height, fid=fid)
+        cam_infos.append(cam_info)
+    return cam_infos
+        
+
+def readEgoExoSceneInfo(path, eval, llffhold=2):
+    intrinsics_path = os.path.join(path, 'intrinsics.txt')
+    extrinsics_path = os.path.join(path, 'trajectory.txt')
+    frames_path = os.path.join(path, 'frames')
+    cam_infos = readEgoExoCameras(path, intrinsics_path, extrinsics_path, frames_path)
+
+    if eval:
+        train_cam_infos = [c for idx, c in enumerate(
+            cam_infos) if (idx + 1) % llffhold != 0]
+        test_cam_infos = [c for idx, c in enumerate(
+            cam_infos) if (idx + 1) % llffhold == 0]
+    else:
+        train_cam_infos = cam_infos
+        test_cam_infos = []
+
+    nerf_normalization = getNerfppNorm(train_cam_infos)
+
+    ply_path = os.path.join(path, 'points.ply')
+    pcd = fetchPly(ply_path)
+
+    scene_info = SceneInfo(point_cloud=pcd,
+                           train_cameras=train_cam_infos,
+                           test_cameras=test_cam_infos,
+                           nerf_normalization=nerf_normalization,
+                           ply_path=ply_path)
+    return scene_info
+
+
 sceneLoadTypeCallbacks = {
     "Colmap": readColmapSceneInfo,  # colmap dataset reader from official 3D Gaussian [https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/]
     "Blender": readNerfSyntheticInfo,  # D-NeRF dataset [https://drive.google.com/file/d/1uHVyApwqugXTFuIRRlE4abTW8_rrVeIK/view?usp=sharing]
     "DTU": readNeuSDTUInfo,  # DTU dataset used in Tensor4D [https://github.com/DSaurus/Tensor4D]
     "nerfies": readNerfiesInfo,  # NeRFies & HyperNeRF dataset proposed by [https://github.com/google/hypernerf/releases/tag/v0.1]
     "plenopticVideo": readPlenopticVideoDataset,  # Neural 3D dataset in [https://github.com/facebookresearch/Neural_3D_Video]
-    'MonST3R': readMonST3RSceneInfo
+    'MonST3R': readMonST3RSceneInfo,
+    'EgoExo': readEgoExoSceneInfo
 }
