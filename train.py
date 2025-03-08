@@ -104,8 +104,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
         # Loss
         gt_image = viewpoint_cam.original_image.cuda()
-        Ll1 = l1_loss(image, gt_image)
-        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
+        mask = viewpoint_cam.mask
+        Ll1 = l1_loss(image * mask, gt_image * mask)
+        loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image * mask, gt_image * mask, mask))
         loss.backward()
 
         iter_end.record()
@@ -232,7 +233,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                                                  gt_image[None], global_step=iteration)
 
                 l1_test = l1_loss(images, gts)
-                psnr_test = psnr(images, gts).mean()
+                psnr_test = psnr(images, gts, viewpoint.mask).mean()
                 if config['name'] == 'test' or len(validation_configs[0]['cameras']) == 0:
                     test_psnr = psnr_test
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))

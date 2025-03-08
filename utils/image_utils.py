@@ -16,6 +16,13 @@ def mse(img1, img2):
     return (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
 
 
-def psnr(img1, img2):
-    mse = (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
+def psnr(img1, img2, mask):
+    error_mask = (img1 * mask - img2 * mask) ** 2
+    error_mask = error_mask.view(img1.shape[0], -1)
+    mse = error_mask.sum(1, keepdim=True)
+    regularizer = mask.sum()
+    mse = mse / regularizer
     return 20 * torch.log10(1.0 / torch.sqrt(mse))
+
+    # mse = (((img1 - img2)) ** 2).view(img1.shape[0], -1).mean(1, keepdim=True)
+    # return 20 * torch.log10(1.0 / torch.sqrt(mse))

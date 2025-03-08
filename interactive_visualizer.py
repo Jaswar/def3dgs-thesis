@@ -63,7 +63,7 @@ def get_new_camera_extrinsic(T, R, zoom, rot_x, rot_y, rot_z, pan_x, pan_y):
 
 
 def get_copy(view):
-    return Camera(view.colmap_id, view.R, view.T, view.FoVx, view.FoVy, view.image, None, view.image_name, view.uid, fid=view._fid)
+    return Camera(view.colmap_id, view.R, view.T, view.FoVx, view.FoVy, view.image, None, view.image_name, view.uid, fid=view._fid, mask=view._mask)
 
 
 class Visualizer(object):

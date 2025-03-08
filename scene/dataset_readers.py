@@ -41,6 +41,7 @@ class CameraInfo(NamedTuple):
     width: int
     height: int
     fid: float
+    mask: np.array
     depth: Optional[np.array] = None
 
 
@@ -648,7 +649,6 @@ def readMonST3RCameras(intrinsics_path, extrinsics_path, images_path, dynamic_ma
 
     return cam_infos
 
-
 def readMonST3RSceneInfo(path, eval, llffhold=2):
     # read camera intrinsics
     intrinsics_path = os.path.join(path, 'pred_intrinsics.txt')
@@ -676,6 +676,21 @@ def readMonST3RSceneInfo(path, eval, llffhold=2):
                            ply_path=points_path)
     return scene_info
 
+import pyvista as pv
+def plot_trajectory(plot, cam_infos, color='red', scale=1.0):
+    # show the cameras
+    for cam in cam_infos:
+        w2c = np.zeros((4, 4))
+        w2c[:3, :3] = np.transpose(cam.R)
+        w2c[:3, 3] = cam.T
+        w2c[3, 3] = 1
+        c2w = np.linalg.inv(w2c)
+        T = c2w[:3, 3]
+        plot.add_mesh(pv.Sphere(radius=0.01 * scale, center=T), color=color)
+        up_vector = np.array([0, 0, 1])
+        direction = np.dot(c2w[:3, :3], up_vector)
+        plot.add_mesh(pv.Arrow(start=T, direction=direction, scale=scale * 0.1), color='blue')
+
 
 def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path):
     with open(intrinsics_path, 'r') as f:
@@ -689,6 +704,8 @@ def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path):
     extrinsics = [line for line in extrinsics if line != ''][1:]
     extrinsics = [list(map(float, line.split(' '))) for line in extrinsics]
 
+    mask = cv.imread(os.path.join(path, 'mask.png'))
+    mask = (mask[:, :, 0] > 0).astype(np.float32)
     images = [Image.open(os.path.join(images_path, img)) for img in sorted(os.listdir(images_path))]
     assert len(extrinsics) == len(images), f'{len(extrinsics)=} != {len(images)=}'
 
@@ -699,8 +716,15 @@ def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path):
         qvec = extrs[:4]
         tvec = extrs[4:]
 
-        R = np.transpose(qvec2rotmat(qvec))
+        R = qvec2rotmat(qvec)
         T = np.array(tvec)
+        c2w = np.zeros((4, 4))
+        c2w[:3, :3] = R
+        c2w[:3, 3] = T
+        c2w[3, 3] = 1
+        w2c = np.linalg.inv(c2w)
+        R = np.transpose(w2c[:3,:3])
+        T = w2c[:3, 3]
         fovx = focal2fov(fx, width)
         fovy = focal2fov(fy, height)
 
@@ -708,7 +732,7 @@ def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path):
         img_path = os.path.join(images_path, f'{img_name}.png')
         fid = i / (len(images) - 1)
         cam_info = CameraInfo(uid=i, R=R, T=T, FovY=fovy, FovX=fovx, image=img,
-                              image_path=img_path, image_name=img_name, width=width, height=height, fid=fid)
+                              image_path=img_path, image_name=img_name, width=width, height=height, fid=fid, mask=mask)
         cam_infos.append(cam_info)
     return cam_infos
         
@@ -732,6 +756,11 @@ def readEgoExoSceneInfo(path, eval, llffhold=2):
 
     ply_path = os.path.join(path, 'points.ply')
     pcd = fetchPly(ply_path)
+
+    # plot = pv.Plotter()
+    # plot.add_points(pcd.points, color='red')
+    # plot_trajectory(plot, cam_infos)
+    # plot.show()
 
     scene_info = SceneInfo(point_cloud=pcd,
                            train_cameras=train_cam_infos,
