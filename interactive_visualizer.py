@@ -119,8 +119,8 @@ class Visualizer(object):
         now = datetime.datetime.now()
         current_time = now.strftime("%Y-%m-%d_%H-%M-%S")
         filename = os.path.join(self.recordings_path, f'recording_{current_time}.mp4')
-        fourcc = cv.VideoWriter_fourcc(*'MP4V')
-        writer = cv.VideoWriter(filename, fourcc, fps, (frames[0].shape[1], frames[0].shape[0]))
+        fourcc = cv.VideoWriter_fourcc(*'mp4v')
+        writer = cv.VideoWriter(filename, fourcc, fps, (frames[0].shape[1], frames[0].shape[0]), True)
         for frame in frames:
             frame = cv.cvtColor(frame, cv.COLOR_RGB2BGR)
             writer.write(frame)
