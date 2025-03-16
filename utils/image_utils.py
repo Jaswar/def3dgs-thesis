@@ -17,10 +17,15 @@ def mse(img1, img2):
 
 
 def psnr(img1, img2, mask):
+    if mask.dim() == 2:  # no batching and channel dimension
+        mask = mask.unsqueeze(0).unsqueeze(0)
+    if mask.dim() == 3:  # masks are batched but no channel dimension
+        mask = mask.unsqueeze(1)
     error_mask = (img1 * mask - img2 * mask) ** 2
     error_mask = error_mask.view(img1.shape[0], -1)
     mse = error_mask.sum(1, keepdim=True)
-    regularizer = mask.sum()
+    mask = mask.view(mask.shape[0], -1)
+    regularizer = mask.sum(1, keepdim=True) * 3  # 3 is the number of channels
     mse = mse / regularizer
     return 20 * torch.log10(1.0 / torch.sqrt(mse))
 

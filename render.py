@@ -39,6 +39,7 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
 
     images = torch.tensor([], device="cuda")
     gts = torch.tensor([], device="cuda")
+    masks = torch.tensor([], device="cuda")
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         if load2gpu_on_the_fly:
             view.load2device()
@@ -48,6 +49,7 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
         d_xyz, d_rotation, d_scaling = deform.step(xyz.detach(), time_input)
         results = render(view, gaussians, pipeline, background, d_xyz, d_rotation, d_scaling, is_6dof)
         rendering = results["render"] * view.mask
+        masks = torch.cat([masks, view.mask.unsqueeze(0)], 0)
         images = torch.cat([images, rendering.unsqueeze(0)], 0)
         depth = results["depth"]
         depth = depth / (depth.max() + 1e-5)
@@ -73,7 +75,7 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
         t_end = time.time()
         t_list.append(t_end - t_start)
 
-    psnr_val = psnr(images, gts).mean()
+    psnr_val = psnr(images, gts, masks).mean()
     t = np.array(t_list[5:])
     fps = 1.0 / t.mean()
     print(f'Test FPS: \033[1;35m{fps:.5f}\033[0m, Num. of GS: {xyz.shape[0]}, PSNR: {psnr_val.item():.5f}')

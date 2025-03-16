@@ -692,29 +692,29 @@ def plot_trajectory(plot, cam_infos, color='red', scale=1.0):
         plot.add_mesh(pv.Arrow(start=T, direction=direction, scale=scale * 0.1), color='blue')
 
 
-def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path):
+def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path, masks_path):
     with open(intrinsics_path, 'r') as f:
         intrinsics = f.read().split('\n')
     intrinsics = [line for line in intrinsics if line != ''][1:]
-    intrinsics = list(map(float, intrinsics[0].split(' ')))
-    fx, fy, cx, cy = intrinsics
+    intrinsics = [list(map(float, line.split(' '))) for line in intrinsics]
 
     with open(extrinsics_path, 'r') as f:
         extrinsics = f.read().split('\n')
     extrinsics = [line for line in extrinsics if line != ''][1:]
     extrinsics = [list(map(float, line.split(' '))) for line in extrinsics]
 
-    mask = cv.imread(os.path.join(path, 'mask.png'))
-    mask = (mask[:, :, 0] > 0).astype(np.float32)
     images = [Image.open(os.path.join(images_path, img)) for img in sorted(os.listdir(images_path))]
-    assert len(extrinsics) == len(images), f'{len(extrinsics)=} != {len(images)=}'
+    masks = [cv.imread(os.path.join(masks_path, img)) for img in sorted(os.listdir(masks_path))]
+    masks = [(mask[:, :, 0] > 0).astype(np.float32) for mask in masks]
+    assert len(extrinsics) == len(images) == len(masks) == len(intrinsics), f'{len(extrinsics)=} != {len(images)=} != {len(masks)=} != {len(intrinsics)=}'
 
     cam_infos = []
     width, height = images[0].size
-    for i, (extrs, img) in enumerate(zip(extrinsics, images)):
+    for i, (intrs, extrs, img, mask) in enumerate(zip(intrinsics, extrinsics, images, masks)):
         # extrs: QW, QX, QY, QZ, X, Y, Z
         qvec = extrs[:4]
         tvec = extrs[4:]
+        fx, fy = intrs[:2]
 
         R = qvec2rotmat(qvec)
         T = np.array(tvec)
@@ -741,7 +741,8 @@ def readEgoExoSceneInfo(path, eval, llffhold=2):
     intrinsics_path = os.path.join(path, 'intrinsics.txt')
     extrinsics_path = os.path.join(path, 'trajectory.txt')
     frames_path = os.path.join(path, 'frames')
-    cam_infos = readEgoExoCameras(path, intrinsics_path, extrinsics_path, frames_path)
+    masks_path = os.path.join(path, 'masks')
+    cam_infos = readEgoExoCameras(path, intrinsics_path, extrinsics_path, frames_path, masks_path)
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(
