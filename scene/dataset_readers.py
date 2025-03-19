@@ -692,30 +692,35 @@ def plot_trajectory(plot, cam_infos, color='red', scale=1.0):
         plot.add_mesh(pv.Arrow(start=T, direction=direction, scale=scale * 0.1), color='blue')
 
 
-def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path, masks_path):
-    with open(intrinsics_path, 'r') as f:
-        intrinsics = f.read().split('\n')
-    intrinsics = [line for line in intrinsics if line != ''][1:]
-    intrinsics = [list(map(float, line.split(' '))) for line in intrinsics]
+def readEgoExoCameras(path):
+    with open(os.path.join(path, 'ordering.txt'), 'r') as f:
+        ordering = f.read().split('\n')
+    ordering = [line for line in ordering if line != '']
+    cam_names = list(set(ordering))
 
-    with open(extrinsics_path, 'r') as f:
-        extrinsics = f.read().split('\n')
-    extrinsics = [line for line in extrinsics if line != ''][1:]
-    extrinsics = [list(map(float, line.split(' '))) for line in extrinsics]
+    all_intrinsics = {}
+    all_extrinsics = {}
+    for i, cam_name in enumerate(cam_names):
+        with open(os.path.join(path, cam_name, 'intrinsics.txt'), 'r') as f:
+            intrinsics = f.read().split('\n')
+        intrinsics = [line for line in intrinsics if line != ''][1:]
+        intrinsics = [list(map(float, line.split(' '))) for line in intrinsics]
+        all_intrinsics[cam_name] = intrinsics
 
-    images = [Image.open(os.path.join(images_path, img)) for img in sorted(os.listdir(images_path))]
-    masks = [cv.imread(os.path.join(masks_path, img)) for img in sorted(os.listdir(masks_path))]
-    masks = [(mask[:, :, 0] > 0).astype(np.float32) for mask in masks]
-    assert len(extrinsics) == len(images) == len(masks) == len(intrinsics), f'{len(extrinsics)=} != {len(images)=} != {len(masks)=} != {len(intrinsics)=}'
+        with open(os.path.join(path, cam_name, 'trajectory.txt'), 'r') as f:
+            extrinsics = f.read().split('\n')
+        extrinsics = [line for line in extrinsics if line != ''][1:]
+        extrinsics = [list(map(float, line.split(' '))) for line in extrinsics]
+        all_extrinsics[cam_name] = extrinsics
+    reference_frame = cv.imread(os.path.join(path, ordering[0], 'frames', '00000.png'))
+    height, width = reference_frame.shape[:2]
 
     cam_infos = []
-    width, height = images[0].size
-    for i, (intrs, extrs, img, mask) in enumerate(zip(intrinsics, extrinsics, images, masks)):
-        # extrs: QW, QX, QY, QZ, X, Y, Z
-        qvec = extrs[:4]
-        tvec = extrs[4:]
-        fx, fy = intrs[:2]
-
+    for i, order in enumerate(ordering):
+        qvec = all_extrinsics[order][i][:4]
+        tvec = all_extrinsics[order][i][4:]
+        fx = all_intrinsics[order][i][0]
+        fy = all_intrinsics[order][i][1]
         R = qvec2rotmat(qvec)
         T = np.array(tvec)
         c2w = np.zeros((4, 4))
@@ -729,20 +734,19 @@ def readEgoExoCameras(path, intrinsics_path, extrinsics_path, images_path, masks
         fovy = focal2fov(fy, height)
 
         img_name = f'{i:05d}'
-        img_path = os.path.join(images_path, f'{img_name}.png')
-        fid = i / (len(images) - 1)
+        img_path = os.path.join(path, order, 'frames', f'{img_name}.png')
+        img = Image.open(img_path)
+        fid = i / (len(ordering) - 1)
+        mask = cv.imread(os.path.join(path, order, 'masks', f'{img_name}.png'))[:, :, 0] > 0
+        mask = mask.astype(np.float32)
         cam_info = CameraInfo(uid=i, R=R, T=T, FovY=fovy, FovX=fovx, image=img,
                               image_path=img_path, image_name=img_name, width=width, height=height, fid=fid, mask=mask)
         cam_infos.append(cam_info)
     return cam_infos
-        
+
 
 def readEgoExoSceneInfo(path, eval, llffhold=2):
-    intrinsics_path = os.path.join(path, 'intrinsics.txt')
-    extrinsics_path = os.path.join(path, 'trajectory.txt')
-    frames_path = os.path.join(path, 'frames')
-    masks_path = os.path.join(path, 'masks')
-    cam_infos = readEgoExoCameras(path, intrinsics_path, extrinsics_path, frames_path, masks_path)
+    cam_infos = readEgoExoCameras(path)
 
     if eval:
         train_cam_infos = [c for idx, c in enumerate(
