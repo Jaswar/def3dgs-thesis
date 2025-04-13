@@ -103,6 +103,7 @@ def getNerfppNorm(cam_info):
 def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
     cam_infos = []
     num_frames = len(cam_extrinsics)
+    print(cam_extrinsics)
     for idx, key in enumerate(cam_extrinsics):
         sys.stdout.write('\r')
         # the exact output you're looking for:
@@ -745,17 +746,23 @@ def readEgoExoCameras(path):
     return cam_infos
 
 
-def readEgoExoSceneInfo(path, eval, llffhold=2):
+def readEgoExoSceneInfo(path, eval):
     cam_infos = readEgoExoCameras(path)
 
-    if eval:
+    if not eval:
+        print('Run mode: Validation')
+        # validation
         train_cam_infos = [c for idx, c in enumerate(
-            cam_infos) if (idx + 1) % llffhold != 0]
+            cam_infos) if idx % 2 == 0]
         test_cam_infos = [c for idx, c in enumerate(
-            cam_infos) if (idx + 1) % llffhold == 0]
+            cam_infos) if idx % 4 == 1]
     else:
-        train_cam_infos = cam_infos
-        test_cam_infos = []
+        print('Run mode: Test')
+        # test
+        train_cam_infos = [c for idx, c in enumerate(
+            cam_infos) if idx % 2 == 0]
+        test_cam_infos = [c for idx, c in enumerate(
+            cam_infos) if idx % 4 == 3]
 
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
