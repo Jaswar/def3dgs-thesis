@@ -341,6 +341,7 @@ def evaluate(source_paths, model_paths):
             gt_dir = method_dir / "gt"
             renders_dir = method_dir / "renders"
             renders, gts, image_names = readImages(renders_dir, gt_dir)
+            assert len(renders) == len(gts) == len(masks)
 
             static_ssim, static_psnr, static_lpips = compute_metrics(renders, gts, masks, testing_indices, splits, static_eval=True)
             dynamic_ssim, dynamic_psnr, dynamic_lpips = compute_metrics(renders, gts, masks, testing_indices, splits, static_eval=False)
