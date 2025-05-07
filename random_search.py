@@ -40,15 +40,18 @@ def execute_in_env(command, env):
     return os.system(f'/bin/bash -c \"source /opt/miniconda3/etc/profile.d/conda.sh && conda activate {env} && {command} \"')
 
 
-def run_experiment(data_path, model_path, config_path):
+def run_experiment(data_path, model_path, config_path, ignore_errors):
     ret_val = execute_in_env(f'python train.py -s \"{data_path}\" ' \
                    f'-m \"{model_path}\" ' \
                    f'--configs \"{config_path}\" --set_seed', 'def3dgs')
     if ret_val != 0:
-        raise ValueError('Execution failed')
+        if not ignore_errors:
+            raise ValueError(f'Execution failed for config {config_path}')
+        else:
+            print(f'Execution failed for config {config_path}, but continuing...')
 
 
-def main(data_path, model_path, timeout=5 * 60 * 60):
+def main(data_path, model_path, ignore_errors, timeout=5 * 60 * 60):
     configs_path = './arguments/ego_exo/random_configs'
     os.makedirs(configs_path, exist_ok=True)
     start_time = time.time()
@@ -65,7 +68,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_path', type=str)
     parser.add_argument('--model_path', type=str)
+    parser.add_argument('--ignore_errors', action='store_true', help='Ignore errors')
     args = parser.parse_args()
     data_path = args.data_path
     model_path = args.model_path
-    main(data_path, model_path)
+    ignore_errors = args.ignore_errors
+    main(data_path, model_path, ignore_errors)
