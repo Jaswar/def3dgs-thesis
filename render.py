@@ -48,13 +48,13 @@ def render_set(model_path, load2gpu_on_the_fly, is_6dof, name, iteration, views,
         time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
         d_xyz, d_rotation, d_scaling = deform.step(xyz.detach(), time_input)
         results = render(view, gaussians, pipeline, background, d_xyz, d_rotation, d_scaling, is_6dof)
-        rendering = results["render"] * view.mask
+        rendering = results["render"]
         masks = torch.cat([masks, view.mask.unsqueeze(0)], 0)
         images = torch.cat([images, rendering.unsqueeze(0)], 0)
         depth = results["depth"]
         depth = depth / (depth.max() + 1e-5)
 
-        gt = view.original_image[0:3, :, :] * view.mask
+        gt = view.original_image[0:3, :, :]
         gts = torch.cat([gts, gt.unsqueeze(0)], 0)
         torchvision.utils.save_image(rendering, os.path.join(render_path, '{0:05d}'.format(idx) + ".png"))
         torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
@@ -348,7 +348,15 @@ if __name__ == "__main__":
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--mode", default='render', choices=['render', 'time', 'view', 'all', 'pose', 'original'])
+    parser.add_argument("--configs", type=str, default = "")
     args = get_combined_args(parser)
+
+    if args.configs:
+        import mmcv
+        from utils.params_utils import merge_hparams
+        config = mmcv.Config.fromfile(args.configs)
+        args = merge_hparams(args, config)
+    
     print("Rendering " + args.model_path)
 
     # Initialize system state (RNG)
