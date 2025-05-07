@@ -252,7 +252,7 @@ def readImages(renders_dir, gt_dir):
     renders = []
     gts = []
     image_names = []
-    for fname in os.listdir(renders_dir):
+    for fname in sorted(os.listdir(renders_dir)):
         render = cv.imread(renders_dir / fname)
         gt = cv.imread(gt_dir / fname)
         renders.append(render / 255.0)
@@ -273,6 +273,10 @@ def compute_metrics(renders, gts, masks, testing_indices, splits, static_eval):
 
     for idx in tqdm(range(len(renders)), desc="Metric evaluation progress"):
         test_idx = testing_indices[idx]
+        # cv.imshow('render', renders[idx])
+        # cv.imshow('gt', gts[idx])
+        # cv.imshow('mask', masks[idx])
+        # cv.waitKey(0)
         if static_eval and is_static(test_idx, splits):
             ssims.append(ssim(renders[idx], gts[idx], masks[idx]))
             psnrs.append(psnr(renders[idx], gts[idx], masks[idx]))
@@ -281,7 +285,7 @@ def compute_metrics(renders, gts, masks, testing_indices, splits, static_eval):
             ssims.append(ssim(renders[idx], gts[idx], masks[idx]))
             psnrs.append(psnr(renders[idx], gts[idx], masks[idx]))
             lpipss.append(lpips(renders[idx], gts[idx], masks[idx]))
-    
+    # cv.destroyAllWindows()
     ssims = torch.tensor(ssims).mean()
     psnrs = torch.tensor(psnrs).mean()
     lpipss = torch.tensor(lpipss).mean()
@@ -290,7 +294,8 @@ def compute_metrics(renders, gts, masks, testing_indices, splits, static_eval):
 
 def get_masks(path):
     masks = sorted(os.listdir(path))
-    masks = [cv.imread(os.path.join(path, mask))[:, :, 0] != 25 for mask in masks]
+    masks = [cv.imread(os.path.join(path, mask))[:, :, 0] > 0 for mask in masks]
+    masks = [(~mask).astype(np.float32) for mask in masks]
     return masks
 
 def evaluate(source_paths, model_paths):

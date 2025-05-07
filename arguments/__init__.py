@@ -60,6 +60,8 @@ class ModelParams(ParamGroup):
         self.load2gpu_on_the_fly = False
         self.is_blender = False
         self.is_6dof = False
+        self.deform_depth = 8
+        self.deform_width = 256
         super().__init__(parser, "Loading Parameters", sentinel)
 
     def extract(self, args):
@@ -83,8 +85,8 @@ class OptimizationParams(ParamGroup):
         self.position_lr_init = 0.00016
         self.position_lr_final = 0.0000016
         self.position_lr_delay_mult = 0.01
-        self.position_lr_max_steps = 30_000
-        self.deform_lr_max_steps = 40_000
+        self.position_lr_max_steps = int(30_000 / 40_000 * self.iterations)
+        self.deform_lr_max_steps = self.iterations
         self.feature_lr = 0.0025
         self.opacity_lr = 0.05
         self.scaling_lr = 0.001
@@ -94,7 +96,7 @@ class OptimizationParams(ParamGroup):
         self.densification_interval = 100
         self.opacity_reset_interval = 3000
         self.densify_from_iter = 500
-        self.densify_until_iter = 15_000
+        self.densify_until_iter = int(15_000 / 40_000 * self.iterations)
         self.densify_grad_threshold = 0.0007
         super().__init__(parser, "Optimization Parameters")
 
