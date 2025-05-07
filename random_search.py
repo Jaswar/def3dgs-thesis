@@ -37,13 +37,13 @@ def write_config(config, path):
 
 
 def execute_in_env(command, env):
-    return os.system(f'/bin/bash -c \"source ~/anaconda3/etc/profile.d/conda.sh && conda activate {env} && {command} \"')
+    return os.system(f'/bin/bash -c \"source /opt/miniconda3/etc/profile.d/conda.sh && conda activate {env} && {command} \"')
 
 
 def run_experiment(data_path, model_path, config_path):
     ret_val = execute_in_env(f'python train.py -s \"{data_path}\" ' \
                    f'-m \"{model_path}\" ' \
-                   f'--configs \"{config_path}\"', 'def3dgs')
+                   f'--configs \"{config_path}\" --set_seed', 'def3dgs')
     if ret_val != 0:
         raise ValueError('Execution failed')
 
