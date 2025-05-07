@@ -4,5 +4,5 @@ ModelParams = dict(
     deform_width = 256
 )
 OptimizationParams = dict(
-    iterations = 25000
+    iterations = 40000
 )

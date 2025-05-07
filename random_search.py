@@ -61,7 +61,7 @@ def main(data_path, model_path, ignore_errors, timeout=5 * 60 * 60):
         config_path = os.path.join(configs_path, f'config_{config_index}.py')
         model_path_ = os.path.join(model_path, f'model_{config_index}')
         write_config(config, config_path)
-        run_experiment(data_path, model_path_, config_path)
+        run_experiment(data_path, model_path_, config_path, ignore_errors)
         config_index += 1
 
 if __name__ == '__main__':
