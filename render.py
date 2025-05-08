@@ -308,7 +308,7 @@ def render_sets(dataset: ModelParams, iteration: int, pipeline: PipelineParams, 
     with torch.no_grad():
         gaussians = GaussianModel(dataset.sh_degree)
         scene = Scene(dataset, gaussians, load_iteration=iteration, shuffle=False)
-        deform = DeformModel(dataset.is_blender, dataset.is_6dof)
+        deform = DeformModel(dataset.deform_depth, dataset.deform_width, dataset.is_blender, dataset.is_6dof)
         deform.load_weights(dataset.model_path)
 
         bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
